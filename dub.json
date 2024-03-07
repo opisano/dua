@@ -1,0 +1,10 @@
+{
+	"authors": [
+		"olivier"
+	],
+	"dflags": ["-dip1000"],
+	"copyright": "Copyright © 2024, olivier",
+	"description": "A minimal D application.",
+	"license": "proprietary",
+	"name": "dua"
+}
