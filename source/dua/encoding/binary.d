@@ -8,6 +8,7 @@ import std.datetime;
 import std.exception;
 import std.sumtype;
 import std.traits;
+import std.typecons;
 import std.uuid;
 
 @safe:
@@ -59,16 +60,16 @@ struct BinaryEncoder
     unittest
     {
         // check we can encode a 16 bit integer in a 8 byte buffer
-        ubyte[] buffer = [0, 0, 0, 0, 0, 0, 0, 0];
+        ubyte[8] buffer;
         BinaryEncoder be;
         ubyte[] remaining = be.encode!bool(buffer, true);
 
-        assert (buffer.equal([1, 0, 0, 0, 0, 0, 0, 0]));
-        assert (remaining.equal([0, 0, 0, 0, 0, 0, 0]));
+        assert (buffer[].equal([1, 0, 0, 0, 0, 0, 0, 0]));
+        assert (remaining.length == 7);
 
         remaining = be.encode!bool(remaining, false);
-        assert (buffer.equal([1, 0, 0, 0, 0, 0, 0, 0]));
-        assert (remaining.equal([0, 0, 0, 0, 0, 0]));
+        assert (buffer[].equal([1, 0, 0, 0, 0, 0, 0, 0]));
+        assert (remaining.length == 6);
 
         // check an error is thrown if there is no space
         remaining = [];
@@ -108,16 +109,16 @@ struct BinaryEncoder
     unittest 
     {
         // check we can encode a 16 bit integer in a 8 byte buffer
-        ubyte[] buffer = [0, 0, 0, 0, 0, 0, 0, 0];
+        ubyte[8] buffer;
         BinaryEncoder be;
         ubyte[] remaining = be.encode!ushort(buffer, 0xCAFE);
 
-        assert (remaining.equal([0, 0, 0, 0, 0, 0]));
-        assert (buffer.equal([0xFE, 0xCA, 0, 0, 0, 0, 0, 0]));
+        assert (remaining.length == 6);
+        assert (buffer[].equal([0xFE, 0xCA, 0, 0, 0, 0, 0, 0]));
 
         ubyte[] left = be.encode!float(remaining, -6.5f);
         assert (remaining.equal([0, 0, 0xD0, 0xC0, 0, 0]));
-        assert (left.equal([0, 0]));
+        assert (left.length == 2);
 
         // check an error is thrown if we try to encode a 64 bit value in the remaining bytes 
         assertThrown!DuaBadEncodingException(be.encode!ulong(left, 0x123412341234124));
@@ -166,17 +167,18 @@ struct BinaryEncoder
     unittest 
     {
         // Check non-null string
-        ubyte[] buffer = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        ubyte[12] buffer;
         BinaryEncoder be;
         ubyte[] remaining = be.encode!string(buffer, "水Boy");
 
-        assert (buffer.equal([0x06, 0, 0, 0, 0xE6, 0xB0, 0xB4, 0x42, 0x6F, 0x79, 0, 0]));
-        assert (remaining.equal([0, 0]));
+        assert (buffer[].equal([0x06, 0, 0, 0, 0xE6, 0xB0, 0xB4, 0x42, 0x6F, 0x79, 0, 0]));
+        assert (remaining.length == 2);
 
         // check null string
         buffer[] = 0;
         remaining = be.encode!string(buffer, null);
-        assert (buffer.equal([0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0]));
+        assert (buffer[].equal([0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0]));
+        assert (remaining.length == 8);
 
         // check string length 
         assertThrown!DuaBadEncodingException(be.encode!string(buffer, "This is a very long string for such a buffer"));
@@ -203,14 +205,14 @@ struct BinaryEncoder
     ubyte[] encode(T)(return scope ubyte[] buffer, T value) scope 
             if (is(T == SysTime))
     {
-        immutable limitLow = SysTime(DateTime(1601, 1, 1, 0, 0, 0), UTC());
-        immutable limitHigh = SysTime(DateTime(9999, 12, 31, 11, 59, 59), UTC());
+        static immutable minimumDate = SysTime(DateTime(1601, 1, 1, 0, 0, 0), UTC());
+        static immutable maximumDate = SysTime(DateTime(9999, 12, 31, 11, 59, 59), UTC());
 
         long encodedValue = 0;
 
-        if (value > limitLow && value < limitHigh)
+        if (value > minimumDate && value < maximumDate)
         {
-            Duration dur = value - limitLow;
+            Duration dur = value - minimumDate;
             encodedValue = dur.total!"hnsecs";
         }
 
@@ -219,12 +221,12 @@ struct BinaryEncoder
 
     unittest 
     {
-        ubyte[] buffer = [0, 0, 0, 0, 0, 0, 0, 0];
+        ubyte[8] buffer;
         BinaryEncoder be;
         auto time1 = SysTime(DateTime(1601, 1, 1, 1, 0, 0), UTC());
         ubyte[] remaining = be.encode!SysTime(buffer, time1);
 
-        assert (buffer.equal([0, 0x68, 0xc4, 0x61, 0x08, 0, 0, 0]));
+        assert (buffer[].equal([0, 0x68, 0xc4, 0x61, 0x08, 0, 0, 0]));
         assert (remaining.length == 0);
     }
 
@@ -266,82 +268,298 @@ struct BinaryEncoder
     unittest 
     {
         // Check non-null string
-        ubyte[] buffer = [0, 0, 0, 0, 0, 0, 0, 0, 
-                          0, 0, 0, 0, 0, 0, 0, 0];
+        ubyte[16] buffer;
 
         auto value = UUID("72962B91-FA75-4AE6-8D28-B404DC7DAF63");
         BinaryEncoder be;
-        ubyte[] remaining = be.encode!UUID(buffer, value);
+        be.encode!UUID(buffer, value);
 
-        assert (buffer.equal([0x91, 0x2B, 0x96, 0x72, 0x75, 0xFA, 0xE6, 0x4A,
-                              0x8D, 0x28, 0xB4, 0x04, 0xDC, 0x7D, 0xAF, 0x63]));
+        assert (buffer[].equal([0x91, 0x2B, 0x96, 0x72, 0x75, 0xFA, 0xE6, 0x4A,
+                                0x8D, 0x28, 0xB4, 0x04, 0xDC, 0x7D, 0xAF, 0x63]));
     }
 
-
-    ubyte[] encode(T)(return scope ubyte[] buffer, T value) scope 
-            if (is(T == NodeId))
+    /** 
+     * Encode a NodeId value
+     *
+     * the first byte of the encoded form indicates the format of the rest of the encoded NodeId.
+     * 
+     * Params: 
+     *     T = The type to encode
+     *     buffer = Buffer where to encode the value
+     *     value = Value to encode 
+     *     nsUri = The NodeId is followed by a namespaceUri in the stream (when encoding an ExpandedNodeId)
+     *     serverIndex = The NodeId is followed by a serverIndex in the stream (when encoding an ExpandedNodeId)
+     *
+     * Returns:
+     *     The remaining part of the buffer after the written value
+     *
+     * Throws: 
+     *     DuaBadEncodingException if there is not enough space left in the buffer.
+     */
+    ubyte[] encode(T)(return scope ubyte[] buffer, T value, 
+            Flag!"namespaceUri" nsUri = No.namespaceUri, 
+            Flag!"serverIndex" serverIndex = No.serverIndex ) scope if (is(T == NodeId))
     {
-        // calculate space needed to encode value
-        size_t neededSpace = 1 + 2 +
-            value.identifier.match!(
-                (uint v) => 4,
-                (string v) => 4 + v.length,
-                (UUID v) => 16,
-                (bstring v) => 4 + v.length
-            );
-        
-        enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to encode value");
+        ubyte encodingByte = nsUri ? 0x80 : 0x00;
+        encodingByte |= serverIndex ? 0x40 : 0x00;
 
-        // first byte is encoding byte
-        buffer[0] = cast(ubyte) value.identifier.match!(
-            (uint v) => 0x02,
-            (string v) => 0x03,
-            (UUID v) => 0x04,
-            (bstring v) => 0x05
-        );
-
-        // next two bytes are namespace index 
-        std.bitmanip.write!(ushort, Endian.littleEndian)(buffer, value.namespaceIndex, 1);
-
-        buffer = buffer[3 .. $];
-
-        // then encode indentifier
-        value.identifier.match!(
-            (uint v) 
+        return value.identifier.match!(
+            (uint v)
             {
-                buffer = encode!uint(buffer, v);
+                if (value.namespaceIndex == 0 && v <= ubyte.max)
+                {
+                    size_t neededSpace = 2;
+                    enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to encode value");
+                    buffer[0] = encodingByte | 0;
+                    buffer[1] = cast(ubyte) v;
+                    return buffer[neededSpace .. $];
+                }
+                else if (value.namespaceIndex <= ubyte.max && v <= ushort.max)
+                {
+                    size_t neededSpace = 4;
+                    enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to encode value");
+                    buffer[0] = encodingByte | 1;
+                    buffer[1] = cast(ubyte) value.namespaceIndex;
+                    std.bitmanip.write!(ushort, Endian.littleEndian)(buffer, cast(ushort)v, 2);
+                    return buffer[neededSpace .. $];
+                }
+                else 
+                {
+                    size_t neededSpace = 7;
+                    enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to encode value");
+                    buffer[0] = encodingByte | 2;
+                    std.bitmanip.write!(ushort, Endian.littleEndian)(buffer, value.namespaceIndex, 1);
+                    std.bitmanip.write!(uint, Endian.littleEndian)(buffer, v, 3);
+                    return buffer[neededSpace .. $];
+                }
             },
-            (string v)
+            (string v) 
             {
-                buffer = encode!string(buffer, v);
+                size_t neededSpace = 1         // encoding byte
+                                   + 2         // namespace index
+                                   + 4         // string length
+                                   + v.length;
+                enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to encode value");
+                buffer[0] = encodingByte | 3;
+                std.bitmanip.write!(ushort, Endian.littleEndian)(buffer, value.namespaceIndex, 1);
+                buffer = buffer[3 .. $];
+                return encode!string(buffer, v);
             },
             (UUID v)
             {
-                buffer = encode!UUID(buffer, v);
+                size_t neededSpace =  1        // encoding byte
+                                   +  2        // namespace index 
+                                   + 16;       // guid value
+                enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to encode value");
+                buffer[0] = encodingByte | 4;
+                std.bitmanip.write!(ushort, Endian.littleEndian)(buffer, value.namespaceIndex, 1);
+                buffer = buffer[3 .. $];
+                return encode!UUID(buffer, v);
             },
             (bstring v)
             {
-                buffer = encode!bstring(buffer, v);
-            },
+                size_t neededSpace = 1         // encoding byte
+                                   + 2         // namespace index
+                                   + 4         // string length
+                                   + v.length;
+                enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to encode value");
+                buffer[0] = encodingByte | 5;
+                std.bitmanip.write!(ushort, Endian.littleEndian)(buffer, value.namespaceIndex, 1);
+                buffer = buffer[3 .. $];
+                return encode!bstring(buffer, v);
+            }
         );
+    }
+
+    unittest 
+    {
+        // check with 2 byte numeric
+        {
+            ubyte[4] buffer;
+            
+            auto n = NodeId(0, 42);
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!NodeId(buffer, n);
+
+            assert (remaining.length == 2);
+            assert (buffer[].equal([0, 42, 0, 0]));
+        }
+
+        // check with 4 byte numeric
+        {
+            ubyte[5] buffer;
+            
+            auto n = NodeId(5, 1_025);
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!NodeId(buffer, n);
+
+            assert (remaining.length == 1);
+            assert (buffer[].equal([1, 5, 0x01, 0x04, 0]));
+        }
+
+        // check with numeric 
+        {
+            ubyte[8] buffer;
+            
+            auto n = NodeId(300, 500_000);
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!NodeId(buffer, n);
+
+            assert (remaining.length == 1);
+            assert (buffer[].equal([2, 0x2C, 0x01, 0x20, 0xA1, 0x07, 0x00, 0x00]));
+        }
+
+        // Check with string node id
+        {
+            ubyte[16] buffer;
+            
+            auto n = NodeId(2, "Hot水");
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!NodeId(buffer, n);
+
+            assert (remaining.length == 3);
+            assert (buffer[].equal([0x03, 0x02, 0x00, 0x06, 0x00, 0x00, 0x00, 0x48,
+                                    0x6F, 0x74, 0xE6, 0xB0, 0xB4, 0x00, 0x00, 0x00]));
+        }
+
+        // Check with GUID node id 
+        {
+            ubyte[32] buffer;
+
+            auto n = NodeId(3, UUID("72962B91-FA75-4AE6-8D28-B404DC7DAF63"));
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!NodeId(buffer, n);
+
+            assert (remaining.length == 13);
+            assert (buffer[].equal([0x04, 0x03, 0x00, 0x91, 0x2B, 0x96, 0x72, 0x75, 
+                                    0xFA, 0xE6, 0x4A, 0x8D, 0x28, 0xB4, 0x04, 0xDC, 
+                                    0x7D, 0xAF, 0x63, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]));
+
+        }
+
+        // Check with binary string 
+        ubyte[16] buffer;
+
+        bstring v = [0x01, 0x02, 0x03, 0x04];
+        auto n = NodeId(4, v);
+        BinaryEncoder be;
+        ubyte[] remaining = be.encode!NodeId(buffer, n);
+
+        assert (buffer[].equal([0x05, 0x04, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01,
+                                0x02, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00]));
+
+        assert (remaining.length == 5);
+    }
+
+
+    /** 
+     * Encode an ExpandedNodeId value
+     *
+     * 
+     * Params: 
+     *     T = The type to encode
+     *     buffer = Buffer where to encode the value
+     *     value = Value to encode 
+     *
+     * Returns:
+     *     The remaining part of the buffer after the written value
+     *
+     * Throws: 
+     *     DuaBadEncodingException if there is not enough space left in the buffer.
+     */
+    ubyte[] encode(T)(return scope ubyte[] buffer, T value) scope 
+            if (is(T == ExpandedNodeId))
+    {
+        Flag!"namespaceUri" nsUri = No.namespaceUri;        
+        Flag!"serverIndex" serverIndex = No.serverIndex;
+
+        /*
+          If the NamespaceUri is present, then the encoder shall encode the NamespaceIndex as 0 in the stream when the
+          NodeId portion is encoded. The unused NamespaceIndex is included in the stream for consistency. 
+        */
+        if (value.namespaceUri !is null && value.namespaceUri.length > 0)
+        {
+            value.nodeId.namespaceIndex = 0;
+            nsUri = Yes.namespaceUri;
+        }
+
+        // The ServerIndex is omitted if it is equal to zero.
+        if (value.serverIndex > 0)
+        {
+            serverIndex = Yes.serverIndex;
+        }
+
+        // The ExpandedNodeId is encoded by first encoding a NodeId
+        buffer = encode!NodeId(buffer, value.nodeId, nsUri, serverIndex);
+
+        if (nsUri)
+            buffer = encode!string(buffer, value.namespaceUri);
+
+        if (serverIndex)
+            buffer = encode!uint(buffer, value.serverIndex);
 
         return buffer;
     }
 
     unittest 
     {
-        ubyte[] buffer = [0, 0, 0, 0, 0, 0, 0, 0, 
-                          0, 0, 0, 0, 0, 0, 0, 0];
-        
-        // check string NodeId
-        auto n = NodeId(2, "Hot水");
-        BinaryEncoder be;
-        ubyte[] remaining = be.encode!NodeId(buffer, n);
+        // Check without neither nsUri nor serverIndex
+        {
+            auto en = ExpandedNodeId(NodeId(5, 1_025), null, 0);
 
-        assert (remaining.equal([0, 0, 0]));
-        assert (buffer.equal([0x03, 0x02, 0x00, 0x06, 0x00, 0x00, 0x00, 0x48,
-                              0x6F, 0x74, 0xE6, 0xB0, 0xB4, 0x00, 0x00, 0x00]));
+            ubyte[5] buffer;
+            
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!ExpandedNodeId(buffer, en);
 
+            assert (remaining.length == 1);
+            assert (buffer[].equal([1, 5, 0x01, 0x04, 0]));
+        }
+
+        // Check with a namespace Uri 
+        {
+            auto en = ExpandedNodeId(NodeId(5, 1_025), "http://tartiflette.org/", 0);
+
+            ubyte[32] buffer;
+            
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!ExpandedNodeId(buffer, en);
+
+            assert (remaining.length == 1);
+            assert (buffer[].equal([0x81, 0, 0x01, 0x04, 0x17, 0, 0, 0, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x74, 
+                                    0x61, 0x72, 0x74, 0x69, 0x66, 0x6c, 0x65, 0x74, 0x74, 0x65, 0x2e, 0x6f, 0x72, 0x67, 
+                                    0x2f, 0]));
+        }
+
+        // Check with a server index
+        {
+            auto en = ExpandedNodeId(NodeId(5, 1_025), null, 42);
+
+            ubyte[8] buffer;
+            
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!ExpandedNodeId(buffer, en);
+
+            assert (remaining.length == 0);
+            assert (buffer[].equal([0x41, 5, 0x01, 0x04, 0x2A, 0, 0, 0]));
+        }
+
+        // check with a namespace uri and a server index 
+                // Check with a namespace Uri 
+        {
+            auto en = ExpandedNodeId(NodeId(5, 1_025), "http://tartiflette.org/", 42);
+
+            ubyte[36] buffer;
+            
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!ExpandedNodeId(buffer, en);
+
+            assert (remaining.length == 1);
+            assert (buffer[].equal([0xC1, 0, 0x01, 0x04, 0x17, 0, 0, 0, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x74, 
+                                    0x61, 0x72, 0x74, 0x69, 0x66, 0x6c, 0x65, 0x74, 0x74, 0x65, 0x2e, 0x6f, 0x72, 0x67, 
+                                    0x2f, 0x2A, 0, 0, 0, 0]));
+        }
     }
 }
 

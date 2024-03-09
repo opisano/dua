@@ -389,6 +389,14 @@ struct NodeId
 }
 
 
+struct ExpandedNodeId 
+{
+    NodeId nodeId;
+    string namespaceUri;
+    uint serverIndex;
+}
+
+
 enum AccessLevel
 {
     CurrentRead = 1 << 0,
