@@ -696,8 +696,29 @@ struct BinaryEncoder
         assert (buffer[].equal([0x03, 0x0C, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00]));
         assert (remaining.length == 0);
     }
+
+    ubyte[] encode(T)(return scope ubyte[] buffer, T value) scope 
+            if (is(T == QualifiedName))
+    {
+        size_t neededSpace = ushort.sizeof + int.sizeof + value.name.length;
+        enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to encode value");
+
+        buffer = encode!ushort(buffer, value.namespaceIndex);
+        return  encode!string(buffer, value.name);
+    }
+
+    unittest 
+    {
+        ubyte[16] buffer;
+        auto qn = QualifiedName(5, "ABBA");
+
+        BinaryEncoder be;
+        ubyte[] remaining = be.encode!QualifiedName(buffer, qn);
+
+        assert (remaining.length == 6);
+        assert (buffer[].equal([0x05, 0x00, 0x04, 0x00, 0x00, 0x00, 
+                                0x41, 0x42, 0x42, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]));
+    }
 }
-
-
 
 
