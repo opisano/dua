@@ -2,6 +2,8 @@ module dua.encoding.binary;
 
 import dua.except;
 import dua.node;
+import dua.diagnosticinfo;
+import dua.statuscode;
 import std.algorithm.mutation: reverse;
 import std.bitmanip;
 import std.datetime;
@@ -474,6 +476,8 @@ struct BinaryEncoder
         Flag!"namespaceUri" nsUri = No.namespaceUri;        
         Flag!"serverIndex" serverIndex = No.serverIndex;
 
+        size_t neededSpace;
+
         /*
           If the NamespaceUri is present, then the encoder shall encode the NamespaceIndex as 0 in the stream when the
           NodeId portion is encoded. The unused NamespaceIndex is included in the stream for consistency. 
@@ -482,16 +486,20 @@ struct BinaryEncoder
         {
             value.nodeId.namespaceIndex = 0;
             nsUri = Yes.namespaceUri;
+            neededSpace += int.sizeof + value.namespaceUri.length;
         }
 
         // The ServerIndex is omitted if it is equal to zero.
         if (value.serverIndex > 0)
         {
             serverIndex = Yes.serverIndex;
+            neededSpace += int.sizeof;
         }
 
         // The ExpandedNodeId is encoded by first encoding a NodeId
         buffer = encode!NodeId(buffer, value.nodeId, nsUri, serverIndex);
+
+        enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to encode value");
 
         if (nsUri)
             buffer = encode!string(buffer, value.namespaceUri);
@@ -561,6 +569,135 @@ struct BinaryEncoder
                                     0x2f, 0x2A, 0, 0, 0, 0]));
         }
     }
+
+
+    /** 
+     * Encode an ExpandedNodeId value
+     *
+     * 
+     * Params: 
+     *     T = The type to encode
+     *     buffer = Buffer where to encode the value
+     *     value = Value to encode 
+     *
+     * Returns:
+     *     The remaining part of the buffer after the written value
+     *
+     * Throws: 
+     *     DuaBadEncodingException if there is not enough space left in the buffer.
+     */
+    ubyte[] encode(T)(return scope ubyte[] buffer, T value,
+            Flag!"symbolicId" symbolicId, 
+            Flag!"namespace" namespace,
+            Flag!"localizedText" localizedText,
+            Flag!"locale" locale,
+            Flag!"additionalInfo" additionalInfo, 
+            Flag!"innerStatusCode" innerStatusCode,
+            Flag!"innerDiagnosticInfo" innerDiagnosticInfo) scope if (is(T == DiagnosticInfo))
+    {
+        
+        ubyte encodingMask; // A bit mask that indicates which fields are present in the stream
+
+        enum // bit mask values
+        {
+            HasSymbolicId          = 0x01,
+            HasNamespace           = 0x02,
+            HasLocalizedText       = 0x04,
+            HasLocale              = 0x08,
+            HasAdditionalInfo      = 0x10,
+            HasInnerStatusCode     = 0x20,
+            HasInnerDiagnosticInfo = 0x40
+        }
+
+        size_t neededSpace = 1;  // number of bytes needed in buffer to encode value
+
+        if (symbolicId) 
+        {
+            encodingMask |= HasSymbolicId;
+            neededSpace += int.sizeof;
+        }
+
+        if (namespace) 
+        {
+            encodingMask |= HasNamespace;
+            neededSpace += int.sizeof;
+        }
+
+        if (localizedText)
+        {
+            encodingMask |= HasLocalizedText;
+            neededSpace += int.sizeof;
+        }
+
+        if (locale) 
+        {
+            encodingMask |= HasLocale;
+            neededSpace += int.sizeof;
+        }
+
+        if (additionalInfo) 
+        {
+            encodingMask |= HasAdditionalInfo;
+            neededSpace += int.sizeof + value.additionalInfo.length;
+        }
+
+        if (innerStatusCode)
+        {
+            encodingMask |= HasInnerStatusCode;
+            neededSpace += int.sizeof;
+        }
+
+        if (innerDiagnosticInfo && value.innerDiagnosticInfo !is null)
+        {
+            encodingMask |= HasInnerDiagnosticInfo;
+            // Don't increment needed space here, as it will be done recursively
+        }
+
+        enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to encode value");
+
+        buffer[0] = encodingMask;
+        buffer = buffer[1 .. $];
+
+        if (symbolicId)
+            buffer = encode!int(buffer, value.symbolicId);
+        
+        if (namespace)
+            buffer = encode!int(buffer, value.namespaceUri);
+        
+        if (locale)
+            buffer = encode!int(buffer, value.locale);
+        
+        if (localizedText)
+            buffer = encode!int(buffer, value.localizedText);
+
+        if (additionalInfo)
+            buffer = encode!string(buffer, value.additionalInfo);
+
+        if (innerStatusCode)
+            buffer = encode!StatusCode(buffer, value.innerStatusCode);
+
+        if (innerDiagnosticInfo && value.innerDiagnosticInfo !is null)
+            buffer = encode!DiagnosticInfo(buffer, value, symbolicId, namespace, localizedText, locale,
+                                           additionalInfo, innerStatusCode, innerDiagnosticInfo);
+    
+        return buffer;
+    }
+
+    unittest 
+    {
+        ubyte[9] buffer;
+        auto di = DiagnosticInfo(3, 12);
+
+        BinaryEncoder be;
+        ubyte[] remaining = be.encode!DiagnosticInfo(buffer, di, Yes.symbolicId, Yes.namespace, No.localizedText, 
+                                                     No.locale, No.additionalInfo, No.innerStatusCode, 
+                                                     No.innerDiagnosticInfo );
+
+        assert (buffer[].equal([0x03, 0x0C, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00]));
+        assert (remaining.length == 0);
+    }
 }
+
+
 
 

@@ -1,6 +1,6 @@
 module dua.statuscode;
 
-enum StatusCodes
+enum StatusCode : uint
 {
     Good = 0,
     Uncertain = 0x40000000,
