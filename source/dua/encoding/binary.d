@@ -761,7 +761,7 @@ struct BinaryEncoder
             encodingByte |= 0x01;
         }
 
-        if (value.text !is null && value.locale.length > 0)
+        if (value.text !is null && value.text.length > 0)
         {
             encodingByte |= 0x02;
         }
@@ -787,22 +787,42 @@ struct BinaryEncoder
 
     unittest
     {
-        ubyte[20] buffer;
-        auto qn = LocalizedText("ABBA", "fr_FR");
-
-        BinaryEncoder be;
-        ubyte[] remaining = be.encode!LocalizedText(buffer, qn);
-
-        debug 
+        // text
         {
-            import std.stdio;
-            writefln("remaining: %s: ", remaining );
-            writefln("buffer: %s: ", buffer );
+            ubyte[10] buffer;
+            auto qn = LocalizedText("ABBA", null);
+
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!LocalizedText(buffer, qn);
+
+            assert (remaining.length == 1);
+            assert (buffer[].equal([0x02, 0x04, 0x00, 0x00, 0x00, 0x41, 0x42, 0x42, 0x41, 0x00]));
         }
 
-        assert (remaining.length == 2);
-        assert (buffer[].equal([0x03, 0x05, 0x00, 0x00, 0x00, 0x66, 0x72, 0x5F, 0x46, 0x52, 
-                                0x04, 0x00, 0x00, 0x00, 0x41, 0x42, 0x42, 0x41, 0x00, 0x00]));
+        // locale 
+        {
+            ubyte[10] buffer;
+            auto qn = LocalizedText(null, "fr_FR");
+
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!LocalizedText(buffer, qn);
+
+            assert (remaining.length == 0);
+            assert (buffer[].equal([0x01, 0x05, 0x00, 0x00, 0x00, 0x66, 0x72, 0x5F, 0x46, 0x52]));
+        }
+
+        // both 
+        {
+            ubyte[20] buffer;
+            auto qn = LocalizedText("ABBA", "fr_FR");
+
+            BinaryEncoder be;
+            ubyte[] remaining = be.encode!LocalizedText(buffer, qn);
+
+            assert (remaining.length == 2);
+            assert (buffer[].equal([0x03, 0x05, 0x00, 0x00, 0x00, 0x66, 0x72, 0x5F, 0x46, 0x52, 
+                                    0x04, 0x00, 0x00, 0x00, 0x41, 0x42, 0x42, 0x41, 0x00, 0x00]));
+        }
     }
 }
 
