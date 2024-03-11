@@ -572,7 +572,7 @@ struct BinaryEncoder
 
 
     /** 
-     * Encode an ExpandedNodeId value
+     * Encode an DiagnosticInfo value
      *
      * 
      * Params: 
@@ -697,6 +697,21 @@ struct BinaryEncoder
         assert (remaining.length == 0);
     }
 
+    /** 
+     * Encode an QualifiedName value
+     *
+     * 
+     * Params: 
+     *     T = The type to encode
+     *     buffer = Buffer where to encode the value
+     *     value = Value to encode 
+     *
+     * Returns:
+     *     The remaining part of the buffer after the written value
+     *
+     * Throws: 
+     *     DuaBadEncodingException if there is not enough space left in the buffer.
+     */
     ubyte[] encode(T)(return scope ubyte[] buffer, T value) scope 
             if (is(T == QualifiedName))
     {
@@ -720,6 +735,22 @@ struct BinaryEncoder
                                 0x41, 0x42, 0x42, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]));
     }
 
+
+    /** 
+     * Encode an LocalizedText value
+     *
+     * 
+     * Params: 
+     *     T = The type to encode
+     *     buffer = Buffer where to encode the value
+     *     value = Value to encode 
+     *
+     * Returns:
+     *     The remaining part of the buffer after the written value
+     *
+     * Throws: 
+     *     DuaBadEncodingException if there is not enough space left in the buffer.
+     */
     ubyte[] encode(T)(return scope ubyte[] buffer, T value) scope 
             if (is(T == LocalizedText))
     {
@@ -770,10 +801,8 @@ struct BinaryEncoder
         }
 
         assert (remaining.length == 2);
-        assert (buffer[].equal([0x03, 
-                                0x05, 0x00, 0x00, 0x00, 0x66, 0x72, 0x5F, 0x46, 0x52, 
-                                0x04, 0x00, 0x00, 0x00, 0x41, 0x42, 0x42, 0x41, 
-                                0x00, 0x00]));
+        assert (buffer[].equal([0x03, 0x05, 0x00, 0x00, 0x00, 0x66, 0x72, 0x5F, 0x46, 0x52, 
+                                0x04, 0x00, 0x00, 0x00, 0x41, 0x42, 0x42, 0x41, 0x00, 0x00]));
     }
 }
 
