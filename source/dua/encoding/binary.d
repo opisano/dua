@@ -719,6 +719,62 @@ struct BinaryEncoder
         assert (buffer[].equal([0x05, 0x00, 0x04, 0x00, 0x00, 0x00, 
                                 0x41, 0x42, 0x42, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]));
     }
+
+    ubyte[] encode(T)(return scope ubyte[] buffer, T value) scope 
+            if (is(T == LocalizedText))
+    {
+        ubyte encodingByte = 0;
+
+        if (value.locale !is null && value.locale.length > 0)
+        {
+            encodingByte |= 0x01;
+        }
+
+        if (value.text !is null && value.locale.length > 0)
+        {
+            encodingByte |= 0x02;
+        }
+
+        // encoding byte 
+        buffer[0] = encodingByte;
+        buffer = buffer [1 .. $];
+
+        // locale 
+        if (encodingByte & 0x01)
+        {
+            buffer = encode!string(buffer, value.locale);
+        }
+
+        // text
+        if (encodingByte & 0x02)
+        {
+            buffer = encode!string(buffer, value.text);
+        }
+
+        return buffer;
+    }
+
+    unittest
+    {
+        ubyte[20] buffer;
+        auto qn = LocalizedText("ABBA", "fr_FR");
+
+        BinaryEncoder be;
+        ubyte[] remaining = be.encode!LocalizedText(buffer, qn);
+
+        debug 
+        {
+            import std.stdio;
+            writefln("remaining: %s: ", remaining );
+            writefln("buffer: %s: ", buffer );
+        }
+
+        assert (remaining.length == 2);
+        assert (buffer[].equal([0x03, 
+                                0x05, 0x00, 0x00, 0x00, 0x66, 0x72, 0x5F, 0x46, 0x52, 
+                                0x04, 0x00, 0x00, 0x00, 0x41, 0x42, 0x42, 0x41, 
+                                0x00, 0x00]));
+    }
 }
 
 
