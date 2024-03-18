@@ -50,7 +50,7 @@ struct BinaryEncoder
      * Throws: 
      *     DuaBadEncodingException if there is not enough space left in the buffer.
      */
-    ubyte[] encode(T)(return scope ubyte[] buffer, T value) scope 
+    static ubyte[] encode(T)(return scope ubyte[] buffer, T value) 
             if (is(T == bool))
     {
         enforce!DuaBadEncodingException(buffer.length > 0, "No space left to encode value");
@@ -80,6 +80,26 @@ struct BinaryEncoder
 
 
     /** 
+     * Returns the byte count needed to encode value
+     * 
+     * Params: 
+     *     value = value to encode
+     *
+     * Returns: 
+     *     The byte count.
+     */
+    static size_t encodeSize(T)(T value) if (is(T == bool))
+    {
+        return 1;
+    }
+
+    unittest 
+    {
+        assert (BinaryEncoder.encodeSize(true) == 1);
+    }
+
+
+    /** 
      * Encode an integer or a floating point value
      * 
      * All integer types shall be encoded as little-endian values where the least significant byte appears first in 
@@ -99,7 +119,7 @@ struct BinaryEncoder
      * Throws: 
      *     DuaBadEncodingException if there is not enough space left in the buffer.
      */
-    ubyte[] encode(T)(return scope ubyte[] buffer, T value) scope 
+    static ubyte[] encode(T)(return scope ubyte[] buffer, T value)
             if (isIntegral!T || isFloatingPoint!T)
     {
         enforce!DuaBadEncodingException(buffer.length >= T.sizeof, "No space left to encode value");
@@ -128,6 +148,29 @@ struct BinaryEncoder
 
 
     /** 
+     * Returns the byte count needed to encode value
+     * 
+     * Params: 
+     *     value = value to encode
+     *
+     * Returns: 
+     *     The byte count.
+     */
+    static size_t encodeSize(T)(T value) if (isIntegral!T || isFloatingPoint!T)
+    {
+        return T.sizeof;
+    }
+
+    unittest
+    {
+        assert (BinaryEncoder.encodeSize!ushort(42) == 2);
+        assert (BinaryEncoder.encodeSize(42) == 4);
+        assert (BinaryEncoder.encodeSize(42.0f) == 4);
+        assert (BinaryEncoder.encodeSize(42.0) == 8);
+    }
+
+
+    /** 
      * Encode a string value
      *
      * All String values are encoded as a sequence of UTF-8 characters preceded by the length in bytes.
@@ -145,7 +188,7 @@ struct BinaryEncoder
      * Throws: 
      *     DuaBadEncodingException if there is not enough space left in the buffer.
      */
-    ubyte[] encode(T)(return scope ubyte[] buffer, scope T value) scope 
+    static ubyte[] encode(T)(return scope ubyte[] buffer, scope T value)
             if (is(T == string) || is(T == bstring))
     {
         enforce!DuaBadEncodingException((value is null && buffer.length >= int.sizeof) 
@@ -184,6 +227,34 @@ struct BinaryEncoder
 
         // check string length 
         assertThrown!DuaBadEncodingException(be.encode!string(buffer, "This is a very long string for such a buffer"));
+    }
+
+
+    /** 
+     * Returns the byte count needed to encode value
+     * 
+     * Params: 
+     *     value = value to encode
+     *
+     * Returns: 
+     *     The byte count.
+     */
+    static size_t encodeSize(T)(T value) if (is(T == string) || is(T == bstring))
+    {
+        size_t size = int.sizeof;
+
+        if (value !is null)
+        {
+            size += value.length;
+        }
+
+        return size;
+    }
+
+    unittest 
+    {
+        assert (BinaryEncoder.encodeSize("水Boy") == 10);
+        assert (BinaryEncoder.encodeSize!string(null) == 4);
     }
 
 
@@ -232,6 +303,28 @@ struct BinaryEncoder
         assert (remaining.length == 0);
     }
 
+
+    /** 
+     * Returns the byte count needed to encode value
+     * 
+     * Params: 
+     *     value = value to encode
+     *
+     * Returns: 
+     *     The byte count.
+     */
+    static size_t encodeSize(T)(T value) if (is(T == SysTime))
+    {
+        return ulong.sizeof;
+    }
+
+    unittest 
+    {
+        auto time1 = SysTime(DateTime(1601, 1, 1, 1, 0, 0), UTC());
+        assert (BinaryEncoder.encodeSize(time1) == ulong.sizeof);
+    }
+
+
     /** 
      * Encode a GUID value
      *
@@ -278,6 +371,27 @@ struct BinaryEncoder
 
         assert (buffer[].equal([0x91, 0x2B, 0x96, 0x72, 0x75, 0xFA, 0xE6, 0x4A,
                                 0x8D, 0x28, 0xB4, 0x04, 0xDC, 0x7D, 0xAF, 0x63]));
+    }
+
+
+    /** 
+     * Returns the byte count needed to encode value
+     * 
+     * Params: 
+     *     value = value to encode
+     *
+     * Returns: 
+     *     The byte count.
+     */
+    static size_t encodeSize(T)(T value) if (is(T == UUID))
+    {
+        return value.data.length;
+    }
+
+    unittest 
+    {
+        UUID uuid;
+        assert (BinaryEncoder.encodeSize(uuid) == 16);
     }
 
     /** 
@@ -340,7 +454,7 @@ struct BinaryEncoder
                 size_t neededSpace = 1         // encoding byte
                                    + 2         // namespace index
                                    + 4         // string length
-                                   + v.length;
+                                   + (v !is null ? v.length : 0);
                 enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to encode value");
                 buffer[0] = encodingByte | 3;
                 std.bitmanip.write!(ushort, Endian.littleEndian)(buffer, value.namespaceIndex, 1);
@@ -452,6 +566,99 @@ struct BinaryEncoder
                                 0x02, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00]));
 
         assert (remaining.length == 5);
+    }
+
+        /** 
+     * Returns the byte count needed to encode value
+     * 
+     * Params: 
+     *     value = value to encode
+     *
+     * Returns: 
+     *     The byte count.
+     */
+    static size_t encodeSize(T)(T value) if (is(T == NodeId))
+    {
+        return value.identifier.match!(
+            (uint v) 
+            {
+                if (value.namespaceIndex == 0 && v <= ubyte.max)
+                {
+                    return 2;
+                }
+                else if (value.namespaceIndex <= ubyte.max && v <= ushort.max)
+                {
+                    return 4;
+                }
+                else
+                {
+                    return 7;
+                }
+            },
+            (string v)
+            {
+                size_t neededSpace = 1         // encoding byte
+                                   + 2         // namespace index
+                                   + 4         // string length
+                                   + (v !is null ? v.length : 0);
+                return neededSpace;
+            },
+            (UUID v)
+            {
+                size_t neededSpace =  1        // encoding byte
+                                   +  2        // namespace index 
+                                   + 16;       // guid value
+                return neededSpace;
+            },
+            (bstring v)
+            {
+                size_t neededSpace = 1         // encoding byte
+                                   + 2         // namespace index
+                                   + 4         // string length
+                                   + v.length;
+                return neededSpace;
+            }
+        );
+    }
+
+    unittest 
+    {
+        // test with small integers
+        {
+            auto n = NodeId(0, 10);
+            assert (BinaryEncoder.encodeSize(n) == 2);
+        }
+
+        // test with medium integers
+        {
+            auto n = NodeId(10, 4_096);
+            assert (BinaryEncoder.encodeSize(n) == 4);
+        }
+
+        // test with large integers 
+        {
+            auto n = NodeId(300, 100_000);
+            assert (BinaryEncoder.encodeSize(n) == 7);
+        }
+
+        // test with strings 
+        {
+            auto n = NodeId(2, "Hot水");
+            assert (BinaryEncoder.encodeSize(n) == 13);
+        }
+
+        // test with UUID
+        {
+            auto n = NodeId(3, UUID("72962B91-FA75-4AE6-8D28-B404DC7DAF63"));
+            assert (BinaryEncoder.encodeSize(n) == 19);
+        }
+
+        // test with bstring 
+        {
+            bstring v = [0x01, 0x02, 0x03, 0x04];
+            auto n = NodeId(4, v);
+            assert (BinaryEncoder.encodeSize(n) == 11);
+        }
     }
 
 
