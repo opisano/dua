@@ -1034,3 +1034,156 @@ struct BinaryEncoder
 }
 
 
+struct BinaryDecoder
+{
+
+    /** 
+     * Decode a boolean value
+     * 
+     * A Boolean value shall be encoded as a single byte where a value of 0 (zero) is false and any non-zero 
+     * value is true. 
+     *
+     * Encoders shall use the value of 1 to indicate a true value; however, decoders shall treat any non-zero 
+     * value as true. 
+     * 
+     * This function reads the value at the beginning of provided buffer then returns the remaining window 
+     * of the buffer. 
+     * 
+     * Params: 
+     *     T = The type to encode
+     *     buffer = Buffer where to encode the value
+     *     value = Value where to store decoded value 
+     * 
+     * Returns:
+     *     The remaining part of the buffer after the read value
+     *
+     * Throws: 
+     *     DuaBadEncodingException if there is not enough space left in the buffer.
+     */
+    static inout(ubyte)[] decode(T)(return scope inout(ubyte)[] buffer, out T value) if (is(T == bool))
+    {
+        enforce!DuaBadEncodingException(buffer.length >= 1, "No space left to decode value");
+
+        value = (buffer[0] != 0);
+        return buffer[1 .. $];
+    }
+
+    unittest 
+    {
+        ubyte[5] buffer = [0x01, 0x00, 0x00, 0x00, 0x00];
+        bool value;
+        auto remaining = BinaryDecoder.decode(buffer, value);
+
+        assert (remaining.length == 4);
+        assert (value);
+
+        remaining = BinaryDecoder.decode(remaining, value);
+        assert (remaining.length == 3);
+        assert (!value);
+    }
+
+
+    /** 
+     * Decode an integral or floating point value
+     * 
+     * This function reads the value at the beginning of provided buffer then returns the remaining window 
+     * of the buffer. 
+     * 
+     * Params: 
+     *     T = The type to encode
+     *     buffer = Buffer where to encode the value
+     *     value = Value where to store decoded value 
+     * 
+     * Returns:
+     *     The remaining part of the buffer after the read value
+     *
+     * Throws: 
+     *     DuaBadEncodingException if there is not enough space left in the buffer.
+     */
+    static inout(ubyte)[] decode(T)(return scope inout(ubyte)[] buffer, out T value) 
+            if (isIntegral!T || isFloatingPoint!T)
+    {
+        enforce!DuaBadEncodingException(buffer.length >= T.sizeof, "No space left to decode value");
+
+        value = std.bitmanip.read!(T, Endian.littleEndian)(buffer);
+        return buffer;
+    }
+
+    unittest 
+    {
+        uint value;
+        ubyte[5] buffer = [0xBE, 0xBA, 0xFE, 0xCA, 0x00];
+        auto remaining = BinaryDecoder.decode(buffer, value);
+
+        assert (remaining.length == 1);
+        assert (value == 0xCAFEBABE);
+    }
+
+    /** 
+     * Decode a string value
+     * 
+     * This function reads the value at the beginning of provided buffer then returns the remaining window 
+     * of the buffer. 
+     * 
+     * Params: 
+     *     T = The type to encode
+     *     buffer = Buffer where to encode the value
+     *     value = Value where to store decoded value 
+     * 
+     * Returns:
+     *     The remaining part of the buffer after the read value
+     *
+     * Throws: 
+     *     DuaBadEncodingException if there is not enough space left in the buffer.
+     */
+    static inout(ubyte)[] decode(T)(return scope inout(ubyte)[] buffer, out T value) 
+            if (is(T == string) || is(T == bstring))
+    {
+        enforce!DuaBadEncodingException(buffer.length >= int.sizeof, "No space left to decode value");
+
+        int len = std.bitmanip.read!(int, Endian.littleEndian)(buffer);
+
+        // -1 means null
+        if (len == -1)
+        {
+            value = null;
+            return buffer;
+        }
+
+        enforce!DuaBadEncodingException(buffer.length >= len, "No space left to decode value");
+
+        () @trusted 
+        { 
+            auto temp = new Unconst!(ForeachType!T)[len];
+            temp[0 .. len] = cast(Unconst!(ForeachType!T)[]) (buffer[0 .. len]); 
+            value = assumeUnique(temp);
+        }();
+        
+
+        return buffer[len .. $];
+    }
+
+    unittest 
+    {
+        // check null 
+        {
+            string value;
+            ubyte[4] buffer = [0xFF, 0xFF, 0xFF, 0xFF];
+
+            auto remaining = decode(buffer[], value);
+            assert (remaining.length == 0);
+            assert (value is null);
+        }
+
+        // check string 
+        {
+            string value;
+            ubyte[8] buffer = [0x04, 0x00, 0x00, 0x00, 0x41, 0x42, 0x42, 0x41];
+
+            auto remaining = decode(buffer[], value);
+            assert (remaining.length == 0);
+            assert (value == "ABBA");
+        }
+    }
+
+}
