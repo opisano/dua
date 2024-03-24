@@ -1137,7 +1137,7 @@ struct BinaryDecoder
      *     DuaBadEncodingException if there is not enough space left in the buffer.
      */
     static inout(ubyte)[] decode(T)(return scope inout(ubyte)[] buffer, out T value) 
-            if (is(T == string) || is(T == bstring))
+            if (is(T == string) || is(T == bstring)) 
     {
         enforce!DuaBadEncodingException(buffer.length >= int.sizeof, "No space left to decode value");
 
@@ -1151,14 +1151,7 @@ struct BinaryDecoder
         }
 
         enforce!DuaBadEncodingException(buffer.length >= len, "No space left to decode value");
-
-        () @trusted 
-        { 
-            auto temp = new Unconst!(ForeachType!T)[len];
-            temp[0 .. len] = cast(Unconst!(ForeachType!T)[]) (buffer[0 .. len]); 
-            value = assumeUnique(temp);
-        }();
-        
+        value = cast(T) buffer[0..len].idup;
 
         return buffer[len .. $];
     }
@@ -1186,4 +1179,301 @@ struct BinaryDecoder
         }
     }
 
+    /** 
+     * Decode a SysTime value
+     * 
+     * This function reads the value at the beginning of provided buffer then returns the remaining window 
+     * of the buffer. 
+     * 
+     * Params: 
+     *     T = The type to encode
+     *     buffer = Buffer where to encode the value
+     *     value = Value where to store decoded value 
+     * 
+     * Returns:
+     *     The remaining part of the buffer after the read value
+     *
+     * Throws: 
+     *     DuaBadEncodingException if there is not enough space left in the buffer.
+     */
+    static inout(ubyte)[] decode(T)(return scope inout(ubyte)[] buffer, out T value) 
+            if (is(T == SysTime))
+    {
+        static immutable minimumDate = SysTime(DateTime(1601, 1, 1, 0, 0, 0), UTC());
+        enforce!DuaBadEncodingException(buffer.length >= long.sizeof, "No space left to decode value");
+
+        // read encoded value
+        long offset = std.bitmanip.read!(long, Endian.littleEndian)(buffer);
+        value = minimumDate + dur!"hnsecs"(offset);
+
+        return buffer;
+    }
+
+    unittest 
+    {
+        ubyte[8] buffer = [0, 0x68, 0xc4, 0x61, 0x08, 0, 0, 0];
+
+        SysTime val;
+        auto remaining = BinaryDecoder.decode(buffer, val);
+
+        assert (remaining.length == 0);
+        assert (val == SysTime(DateTime(1601, 1, 1, 1, 0, 0), UTC()));
+    }
+
+    /** 
+     * Decode a UUID value
+     * 
+     * This function reads the value at the beginning of provided buffer then returns the remaining window 
+     * of the buffer. 
+     * 
+     * Params: 
+     *     T = The type to encode
+     *     buffer = Buffer where to encode the value
+     *     value = Value where to store decoded value 
+     * 
+     * Returns:
+     *     The remaining part of the buffer after the read value
+     *
+     * Throws: 
+     *     DuaBadEncodingException if there is not enough space left in the buffer.
+     */
+    static inout(ubyte)[] decode(T)(return scope inout(ubyte)[] buffer, out T value) 
+            if (is(T == UUID))
+    {
+        enforce!DuaBadEncodingException(buffer.length >= 16, "No space left to encode value");
+
+        ubyte[16] temp;
+        temp[0..16] = buffer[0..16];
+
+        version (LittleEndian)
+        {
+            // std.uuid uses big endian, convert to little endian
+            temp[0 .. 4].reverse();
+            temp[4 .. 6].reverse();
+            temp[6 .. 8].reverse();
+        }
+
+        value = UUID(temp);
+
+        return buffer[16..$];
+    }
+
+    unittest 
+    {
+        ubyte[16] buffer = [0x91, 0x2B, 0x96, 0x72, 0x75, 0xFA, 0xE6, 0x4A,
+                            0x8D, 0x28, 0xB4, 0x04, 0xDC, 0x7D, 0xAF, 0x63];
+        
+        UUID value;
+        auto remaining = BinaryDecoder.decode(buffer, value);
+
+        assert (remaining.length == 0);
+        assert (value == UUID("72962B91-FA75-4AE6-8D28-B404DC7DAF63"));
+    }
+
+    static inout(ubyte)[] decode(T)(return scope inout(ubyte)[] buffer, out T value) 
+            if (is(T == ExpandedNodeId))
+    {
+        NodeId nid;
+        size_t neededSpace;
+        immutable ubyte encodingByte = buffer[0];
+        buffer = buffer[1 .. $];
+
+        final switch (encodingByte & 0x0F)
+        {
+        case 0:
+            {
+                neededSpace = 1;
+                enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to decode value");
+                nid = NodeId(0, cast(uint)buffer[0]);
+                break;
+            }
+        
+        case 1:
+            {
+                neededSpace = 3;
+                enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to decode value");
+                nid.namespaceIndex = buffer[0];
+                auto temp = buffer[1..$];
+                uint id = std.bitmanip.read!(ushort, Endian.littleEndian)(temp);
+                nid = NodeId(buffer[0], id);
+                break;
+            }
+
+        case 2:
+            {
+                neededSpace = 6;
+                enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to decode value");
+                auto temp = buffer[];
+                ushort ns = std.bitmanip.read!(ushort, Endian.littleEndian)(temp);
+                temp = buffer[2..$];
+                uint id = std.bitmanip.read!(uint, Endian.littleEndian)(temp);
+                nid = NodeId(ns, id);
+                break;
+            }
+
+        case 3:
+            {
+                neededSpace = 6;
+                enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to decode value");
+                auto temp = buffer[];
+                ushort ns = std.bitmanip.read!(ushort, Endian.littleEndian)(temp);
+                temp = buffer[2..$];
+                int len = std.bitmanip.read!(int, Endian.littleEndian)(temp);
+                string val;
+
+                if (len >= 0)
+                {
+                    neededSpace += len;
+                    enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to decode value");
+                    val = cast(string) temp[0 .. len].idup;
+                }
+                nid = NodeId(ns, val);
+                break;
+            }
+
+        case 4:
+            {
+                neededSpace = 18;
+                ushort ns;
+
+                {
+                    auto temp = buffer;
+                    enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to decode value");
+                    ns = std.bitmanip.read!(ushort, Endian.littleEndian)(temp);
+                }
+
+                ubyte[16] temp;
+                temp[0..16] = buffer[2..18];
+
+                version (LittleEndian)
+                {
+                    // std.uuid uses big endian, convert to little endian
+                    temp[0 .. 4].reverse();
+                    temp[4 .. 6].reverse();
+                    temp[6 .. 8].reverse();
+                }
+
+                auto val = UUID(temp);
+                nid = NodeId(ns, val);
+                break;
+            }
+
+        case 5:
+            {
+                neededSpace = 6;
+                enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to decode value");
+                auto temp = buffer[];
+                ushort ns = std.bitmanip.read!(ushort, Endian.littleEndian)(temp);
+                temp = buffer[2..$];
+                int len = std.bitmanip.read!(int, Endian.littleEndian)(temp);
+                bstring val;
+
+                if (len >= 0)
+                {
+                    neededSpace += len;
+                    enforce!DuaBadEncodingException(buffer.length >= neededSpace, "No space left to decode value");
+                    val = temp[0 .. len].idup;
+                }
+                nid = NodeId(ns, val);
+                break;
+            }
+
+        }
+
+        buffer = buffer[neededSpace..$];
+        value.nodeId = nid;
+        return buffer;
+    }
+
+    unittest 
+    {
+        // check with 2 byte numeric
+        {
+            ubyte[4] buffer = [0, 42, 0, 0];
+            ExpandedNodeId eni;
+
+            auto remaining = BinaryDecoder.decode(buffer, eni);
+
+            assert (remaining.length == 2);
+            assert (eni.nodeId.namespaceIndex == 0);
+            assert (eni.nodeId.identifier == NodeId.Identifier(42));
+            assert (eni.namespaceUri is null);
+            assert (eni.serverIndex == 0);
+        }
+
+        // check with 4 byte numeric
+        {
+            ubyte[5] buffer = [1, 5, 0x01, 0x04, 0];
+            ExpandedNodeId eni;
+
+            auto remaining = BinaryDecoder.decode(buffer, eni);
+            assert (remaining.length == 1);
+            assert (eni.nodeId.namespaceIndex == 5);
+            assert (eni.nodeId.identifier == NodeId.Identifier(1_025));
+            assert (eni.namespaceUri is null);
+            assert (eni.serverIndex == 0);
+        }
+
+        // check with a full size numeric
+        {
+            ubyte[8] buffer = [2, 0x2C, 0x01, 0x20, 0xA1, 0x07, 0x00, 0x00];
+            ExpandedNodeId eni;
+
+            auto remaining = BinaryDecoder.decode(buffer, eni);
+            assert (remaining.length == 1);
+            assert (eni.nodeId.namespaceIndex == 300);
+            assert (eni.nodeId.identifier == NodeId.Identifier(500_000));            
+            assert (eni.namespaceUri is null);
+            assert (eni.serverIndex == 0);
+        }
+
+        // check with string node id 
+        {
+            ubyte[16] buffer = [ 0x03, 0x02, 0x00, 0x06, 0x00, 0x00, 0x00, 0x48,
+                                 0x6F, 0x74, 0xE6, 0xB0, 0xB4, 0x00, 0x00, 0x00 ];
+            ExpandedNodeId eni;
+
+            auto remaining = BinaryDecoder.decode(buffer, eni);
+            assert (remaining.length == 3);
+            assert (eni.nodeId.namespaceIndex == 2);
+            assert (eni.nodeId.identifier == NodeId.Identifier("Hot水"));            
+            assert (eni.namespaceUri is null);
+            assert (eni.serverIndex == 0);
+        }
+
+        // check with UUID node id 
+        {
+            ubyte[32] buffer = [ 0x04, 0x03, 0x00, 0x91, 0x2B, 0x96, 0x72, 0x75, 
+                                 0xFA, 0xE6, 0x4A, 0x8D, 0x28, 0xB4, 0x04, 0xDC, 
+                                 0x7D, 0xAF, 0x63, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 ];
+            ExpandedNodeId eni;
+
+            auto remaining = BinaryDecoder.decode(buffer, eni);
+            assert (remaining.length == 13);
+            assert (eni.nodeId.namespaceIndex == 3);
+
+            assert (eni.nodeId.identifier == NodeId.Identifier(
+                UUID("72962B91-FA75-4AE6-8D28-B404DC7DAF63")
+            ));
+        }
+
+        // check with bstring 
+        {
+            ubyte[16] buffer = [ 0x05, 0x02, 0x00, 0x06, 0x00, 0x00, 0x00, 0x48,
+                                 0x6F, 0x74, 0xE6, 0xB0, 0xB4, 0x00, 0x00, 0x00 ];
+            ExpandedNodeId eni;
+
+            auto remaining = BinaryDecoder.decode(buffer, eni);
+            assert (remaining.length == 3);
+            assert (eni.nodeId.namespaceIndex == 2);
+
+            bstring binary = [0x48, 0x6F, 0x74, 0xE6, 0xB0, 0xB4];
+
+            assert (eni.nodeId.identifier == NodeId.Identifier(binary));            
+            assert (eni.namespaceUri is null);
+            assert (eni.serverIndex == 0);
+        }
+    }
 }
+
