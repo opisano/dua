@@ -1,6 +1,8 @@
 module dua.protocol.message;
 
 import dua.encoding.binary;
+import dua.except;
+import std.exception;
 
 version (unittest)
 {
@@ -146,6 +148,62 @@ interface MessageEncoder
      *     Returns the remaining buffer (after the encoding of the message)
      */
     ubyte[] encodeReverseHello(return scope ubyte[] buffer, ref const(ReverseHelloMessage) msg);
+}
+
+/** 
+ * Interface for decoding messages
+ *
+ */
+interface MessageDecoder
+{
+
+    /** 
+     * Decode a Hello Message 
+     * 
+     * Params: 
+     *     buffer = Byte buffer from which to encode message 
+     *     msg = Message to decode 
+     * 
+     * Returns: 
+     *     Returns the remaining buffer (after the decoding of the message)
+     */
+    inout(ubyte)[] decodeHelloMessage(return scope inout(ubyte)[] buffer, out HelloMessage msg);
+
+    /** 
+     * Decode a Acknowledgement Message 
+     * 
+     * Params: 
+     *     buffer = Byte buffer from which to encode message 
+     *     msg = Message to decode 
+     * 
+     * Returns: 
+     *     Returns the remaining buffer (after the decoding of the message)
+     */
+    inout(ubyte)[] decodeAckMessage(return scope inout(ubyte)[] buffer, out AcknowledgeMessage msg);
+
+    /** 
+     * Decode an Error Message 
+     * 
+     * Params: 
+     *     buffer = Byte buffer from which to encode message 
+     *     msg = Message to decode 
+     * 
+     * Returns: 
+     *     Returns the remaining buffer (after the decoding of the message)
+     */
+    inout(ubyte)[] decodeErrorMessage(return scope inout(ubyte)[] buffer, out ErrorMessage msg);
+
+    /** 
+     * Decode a Reverse Hello Message 
+     * 
+     * Params: 
+     *     buffer = Byte buffer from which to encode message 
+     *     msg = Message to decode 
+     * 
+     * Returns: 
+     *     Returns the remaining buffer (after the decoding of the message)
+     */
+    inout(ubyte)[] decodeReverseHelloMessage(return scope inout(ubyte)[] buffer, out ReverseHelloMessage msg);
 }
 
 
@@ -389,6 +447,154 @@ private:
         }
 
         buffer = BinaryEncoder.encode(buffer, cast(uint) neededSpace);
+
+        return buffer;
+    }
+}
+
+
+final class BinaryMessageDecoder : MessageDecoder
+{
+    inout(ubyte)[] decodeHelloMessage(return scope inout(ubyte)[] buffer, out HelloMessage msg)
+    {
+        MessageHeader hdr;
+        buffer = decodeHeader(buffer, hdr);
+
+        enforce!DuaBadDecodingException(hdr.messageType[] == ['H', 'E', 'L', 'F']);
+        enforce!DuaBadDecodingException(buffer.length >= (hdr.messageSize - 8), "Not enough space");
+
+        buffer = BinaryDecoder.decode!uint(buffer, msg.protocolVersion);
+        buffer = BinaryDecoder.decode!uint(buffer, msg.receiveBufferSize);
+        buffer = BinaryDecoder.decode!uint(buffer, msg.sendBufferSize);
+        buffer = BinaryDecoder.decode!uint(buffer, msg.maxMessageSize);
+        buffer = BinaryDecoder.decode!uint(buffer, msg.maxChunkCount);
+        buffer = BinaryDecoder.decode!string(buffer, msg.endpointUrl);
+
+        return buffer;
+    }
+
+    unittest 
+    {
+        ubyte[36] buffer = [ 0x48, 0x45, 0x4C, 0x46, 0x24, 0x00, 0x00, 0x00,
+                             0x03, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00,
+                             0x10, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00,
+                             0x08, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 
+                             0x41, 0x42, 0x42, 0x41 ];
+        
+        scope decoder = new BinaryMessageDecoder;
+        HelloMessage msg;
+        ubyte[] remaining = decoder.decodeHelloMessage(buffer[], msg);
+
+        assert (remaining.length == 0);
+        assert (msg == HelloMessage(3, 16, 16, 32, 8, "ABBA"));
+
+    }
+
+
+    inout(ubyte)[] decodeAckMessage(return scope inout(ubyte)[] buffer, out AcknowledgeMessage msg)
+    {
+        MessageHeader hdr;
+        buffer = decodeHeader(buffer, hdr);
+
+        enforce!DuaBadDecodingException(hdr.messageType[] == ['A', 'C', 'K', 'F']);
+        enforce!DuaBadDecodingException(buffer.length >= (hdr.messageSize - 8), "Not enough space");
+
+        buffer = BinaryDecoder.decode!uint(buffer, msg.protocolVersion);
+        buffer = BinaryDecoder.decode!uint(buffer, msg.receiveBufferSize);
+        buffer = BinaryDecoder.decode!uint(buffer, msg.sendBufferSize);
+        buffer = BinaryDecoder.decode!uint(buffer, msg.maxMessageSize);
+        buffer = BinaryDecoder.decode!uint(buffer, msg.maxChunkCount);
+
+        return buffer;
+    }
+
+    unittest 
+    {
+        ubyte[32] buffer = [ 0x41, 0x43, 0x4B, 0x46, 0x1C, 0x00, 0x00, 0x00,
+                             0x04, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 
+                             0x20, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 
+                             0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 ];
+
+        
+        scope decoder = new BinaryMessageDecoder;
+        AcknowledgeMessage msg;
+        ubyte[] remaining = decoder.decodeAckMessage(buffer[], msg);
+
+        assert (remaining.length == 4);
+        assert (msg == AcknowledgeMessage(4, 32, 32, 16, 8));
+    }
+
+
+    inout(ubyte)[] decodeErrorMessage(return scope inout(ubyte)[] buffer, out ErrorMessage msg)
+    {
+        MessageHeader hdr;
+        buffer = decodeHeader(buffer, hdr);
+
+        enforce!DuaBadDecodingException(hdr.messageType[] == ['E', 'R', 'R', 'F']);
+        enforce!DuaBadDecodingException(buffer.length >= (hdr.messageSize - 8), "Not enough space");
+
+        buffer = BinaryDecoder.decode!uint(buffer, msg.error);
+        buffer = BinaryDecoder.decode!string(buffer, msg.reason);
+
+        return buffer;
+    }
+
+    unittest 
+    {
+        const(ubyte)[32] buffer = [ 0x45, 0x52, 0x52, 0x46, 0x19, 0x00, 0x00, 0x00,
+                                    0x94, 0x01, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 
+                                    0x4E, 0x6F, 0x74, 0x20, 0x66, 0x6F, 0x75, 0x6E,
+                                    0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 ];
+
+        scope decoder = new BinaryMessageDecoder;
+        ErrorMessage msg;
+        const(ubyte)[] remaining = decoder.decodeErrorMessage(buffer[], msg);
+
+        assert (remaining.length == 7);
+        assert (msg == ErrorMessage(404, "Not found"));
+    }
+
+
+    inout(ubyte)[] decodeReverseHelloMessage(return scope inout(ubyte)[] buffer, out ReverseHelloMessage msg)
+    {
+        MessageHeader hdr;
+        buffer = decodeHeader(buffer, hdr);
+
+        enforce!DuaBadDecodingException(hdr.messageType[] == ['R', 'H', 'E', 'F']);
+        enforce!DuaBadDecodingException(buffer.length >= (hdr.messageSize - 8), "Not enough space");
+
+        buffer = BinaryDecoder.decode!string(buffer, msg.serverUri);
+        buffer = BinaryDecoder.decode!string(buffer, msg.endpointUrl);
+
+        return buffer;
+    }
+
+    unittest 
+    {
+        immutable(ubyte)[24] buffer = [ 0x52, 0x48, 0x45, 0x46, 0x18, 0x00, 0x00, 0x00,
+                                        0x04, 0x00, 0x00, 0x00, 0x41, 0x42, 0x42, 0x41, 
+                                        0x04, 0x00, 0x00, 0x00, 0x54, 0x45, 0x53, 0x54 ];
+        
+        ReverseHelloMessage msg;
+        scope decoder = new BinaryMessageDecoder;
+        immutable(ubyte)[] remaining = decoder.decodeReverseHelloMessage(buffer, msg);
+
+        assert (remaining.length == 0);
+        assert (msg == ReverseHelloMessage("ABBA", "TEST"));
+    }
+
+
+private:
+
+    inout(ubyte)[] decodeHeader(return scope inout(ubyte)[] buffer, out MessageHeader hdr)
+    {
+        enforce!DuaBadDecodingException(buffer.length >= 8, "Not enough space");
+
+        buffer = BinaryDecoder.decode!ubyte(buffer, hdr.messageType[0]);
+        buffer = BinaryDecoder.decode!ubyte(buffer, hdr.messageType[1]);
+        buffer = BinaryDecoder.decode!ubyte(buffer, hdr.messageType[2]);
+        buffer = BinaryDecoder.decode!ubyte(buffer, hdr.messageType[3]);
+        buffer = BinaryDecoder.decode!uint(buffer, hdr.messageSize);
 
         return buffer;
     }
